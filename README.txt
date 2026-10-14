@@ -43,8 +43,8 @@ Notes regarding specific target outcomes:
 ## Project Approach
 
 - Dataset: 3,191 rows remaining after exclusions (see Data notes and exclusions)
-- Main features: Z, N, A, N-Z, nuetron fraction, even/odd parity of Z and N, distance to nearest magic number 
-- Exploratory features (ablation): (mass-derived energies) binding energy, mass excess, separation energies
+- Main (Tier 1) features: Z, N, A, N-Z, nuetron fraction, even/odd parity of Z and N, distance to nearest magic number 
+- Exploratory (Tier 2) features (ablation): (mass-derived energies) binding energy, mass excess, separation energies
 - Evaluation: Include results of main features (accuracy, precision, recall, f1) and the same statistics for data including the mass derived features
 - Models: Start with scikit-learn baselines logistic regression and random forest, then try PyTorch MLP with hyperparameter tuning, learning curves, and feature importance
 - Attempting to predict unusual data: predict decay modes for the 151 nuclides removed from data due to having no half-life
