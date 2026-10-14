@@ -1,60 +1,83 @@
 # Predicting Nuclide Decay Mode From Nuclear Structure
 
-Project Question: Given a nuclide's proton and nuetron counts (potential to include mass-derived energies), can a model predict how its ground state primarily decays.
+Project Question: Given a nuclide's proton and neutron counts (potential to include mass-derived energies), can a model predict how its ground state primarily decays?
 
 ## Data Information
 
 Source: IAEA Nuclear Data Section, Live Chart of Nuclides (ground-state table)
 URL: https://nds.iaea.org/relnsd/v1/data?fields=ground_states&nuclides=all
-Downloaded on 10/12/2026 (API rejects scripted requests), each file contains an extraction date column as well for traceability
-Contains 3,386 nuclides with 55 columns; raw file is not included in git so it must be downloaded to reproduce
+Downloaded on 10/12/2026 manually through a browser (the API rejects scripted requests); each file contains an extraction date column as well for traceability
+Contains 3,386 nuclides with 55 columns; raw file included in git
+
+## Setup
+
+- Python 3.14.7, virtual environment in `.venv/`
+- Install PyTorch separately from pytorch.org
+- Run scripts from the project root, e.g. `python src/get_data.py`
 
 ## File Setup
+
+```
 MLNuclearPhysics/
 ├── data/raw/          # untouched download
 ├── data/processed/
 ├── notebooks/         # exploration
-├── src/               # get_data.py, features.py, (later) dataset/model/train
+├── src/               # get_data.py, features.py, split.py, baselines.py,
+│                      # error_analysis.py...
 ├── requirements.txt
 └── README.md
+```
 
 ## Target and its labels
 
 Target: the primary decay mode of the nuclide, 'decay_1' in the data; expected in 5 classes so results are concise yet still meaningful
 
 1. beta_minus; B-; 1,344 appearances in data
-2. beta_plus_ec; EC+B, EC, B+; 1,082 appearances in data
+2. beta_plus_ec; EC+B+, EC, B+; 1,082 appearances in data
 3. alpha; A; 479 appearances in data
-4. stable; STABLE; 244 appearances in data;
+4. stable; STABLE; 244 appearances in data
 5. other; P, N, SF, double decays, delayed emission, etc.; 193 appearances in data
 
+Counts above are for all 3,342 labeled rows. The main dataset (measured half-life only, 3,191 rows) has: beta_minus 1,225 / beta_plus_ec 1,070 / alpha 473 / stable 244 / other 179.
+
 Notes regarding specific target outcomes:
-- For value 2. I grouped the 3 types of decay as one because they all represent the same process (proton to nuetron).
+- For value 2. I grouped the 3 types of decay as one because they all represent the same process (proton to neutron).
 - For value 4. I check if a nuclide is STABLE in the data first, since some rows do actually have a decay_1 value yet decay so slowly they are treated as STABLE
 - For value 5. I group all rare types of decay since there are not enough rows to evaluate (some decays only had 1 row)
 - 44 rows were dropped due to having no decay_1 value, yet they do have a half-life so they can't be grouped as stable
 
 ## Data notes and exclusions
 
-- Columns: half-life, decay branching, and uncertainty have an immediate relationship with decay and are thus excluded. Furthermore, columns: abundance, radis, and nuclear moments are only filled for long-lasting nuclides and are also dropped. Columns with few entries are also dropped
-- Some nuclide masses are estimated rather than measured due to them being impossible to 'weigh' experimentally. Furthermore, none of the nuclides with estimated mass (me_systematics == 'Y' in data) are stable so we also eliminate this feature along with mass uncertainty. Potential to revisit in evaluation
-- 151 rows have a decay mode but no half-life (they do decay but in extreme amounts of time). Due to the nature of these nuclides representing stable however scientifically proven as decaying, we treat them as less reliable and will also exclude them from training data
+- Columns: half-life, decay branching, and uncertainty have an immediate relationship with decay and are thus excluded. Furthermore, columns: abundance, radius, and nuclear moments are only filled for long-lasting nuclides, so even their missingness reveals the label, and they are also dropped. Columns with few entries are also dropped
+- Some nuclide masses appear to be estimated from systematics rather than measured (interpreting `me_systematics == 'Y'` in the data this way, based on the column name and pattern, not documentation). None of the stable nuclides have estimated masses, so we eliminate this column along with the mass uncertainty columns as features. It is kept only as an evaluation flag. Potential to revisit in evaluation
+- 151 labeled rows have a decay mode but no measured half-life. 119 of them also have estimated masses and 119 are beta-minus, which suggests these modes are assumed or predicted rather than directly observed (my inference from the pattern, not stated by the database). Their labels are less reliable, so they are excluded from training and testing and kept for a later comparison against the model's predictions
 
 ## Project Approach
 
-- Dataset: 3,191 rows with a measured half-life
-- Main (Tier 1) features: Z, N, A (Atomic mass number), N-Z, nuetron fraction, even/odd parity of Z and N, distance to nearest magic number
-    Ensured in features.py testing that beta_minus nuclides had higher neutron fraction, alpha emitters had largest mass number, and majority of stable nuclides are even-even. These are all commonly accepted nuclear physics principles to double check are data realtively fits assumptions
-- Exploratory (Tier 2) features (ablation): (mass-derived energies) binding energy, mass excess, separation energies
-- Evaluation: Include results of main features (accuracy, precision, recall, f1) and the same statistics for data including the mass derived features
-- Models: Start with scikit-learn baselines logistic regression and random forest, then try PyTorch MLP with hyperparameter tuning, learning curves, and feature importance
-- Attempting to predict unusual data: predict decay modes for the 151 nuclides removed from data due to having no half-life
+1. Dataset: 3,191 rows with a measured half-life
+2. Main (Tier 1) features: Z, N, A (mass number, Z + N), N-Z, neutron fraction, even/odd parity of Z and N, distance to nearest magic number
+    - Ensured in features.py testing that beta_minus nuclides had higher neutron fraction, alpha emitters had largest mass number, and the majority of stable nuclides are even-even. These are all commonly accepted nuclear physics principles, checked to confirm our data relatively fits assumptions
+3. Establishing Train/Test split: Set aside 20% of data as test (stratified by label), then train on the remaining 80% using 5 fold cross validation
+    - Some isotopes are near identical (Sn-120 and Sn-121), so I experimented with two different kinds of splits. RANDOM split is a traditional split that is purely random in separating train and test data. ELEMENT split addresses the similar isotope issue by sending all isotopes that share the same number of protons entirely to train or entirely to test (24 elements held out). It tests generalization to unseen elements, though neighboring elements remain in training, so it does not test unseen regions of the chart
+    - The test sets are touched once, at the end; all model selection uses cross validation on the training portion
+4. Baselines: I use 3 baseline models (majority class, logistic regression, and random forest from sklearn) to compare against our final model created with PyTorch. Results of 5 fold cross validation on the training portion:
 
-## Progress 
+    | Model | Random split (acc / macro-F1) | Element split (acc / macro-F1) |
+    |---|---|---|
+    | Majority class | 0.384 / 0.111 | 0.383 / 0.111 |
+    | Logistic regression | 0.803 / 0.594 | 0.810 / 0.619 |
+    | Random forest | 0.864 / 0.744 | 0.841 / 0.717 |
 
-- [X] Data downloaded and inspected
-- [X] Labels defined, data issues addressed (data issues discovered using 'get_data.py')
-- [X] Main features adressed ('src/features.py')
-- [] Train/test split, baselines
-    Going forward with training I'll use two splits, random and element. Element accounts for the fact that some nuclides are near-identical, so its possible to test on a nearly-identical trained element.
-- [] PyTorch model, tuning, analysis
+    Linear boundaries already reach about 80% accuracy and the forest's edge is mainly in macro-F1 (the small classes). The forest loses a few points when whole elements are held out while the linear model does not, which suggests a small neighbor-memorization effect, though the difference is close to fold-to-fold noise. Given these results our PyTorch model has the bar set at a macro-F1 of about 0.72 to 0.74 (random forest) depending on the split, with 0.59 to 0.62 as the linear floor
+5. Evaluation: Include results of main features (accuracy, macro-F1, per-class precision and recall) on both splits, and the same statistics for the Tier 2 ablation. Tier 2 adds mass-derived energies (binding energy, mass excess, separation energies, possibly Q-values) to measure how much they help; Q-values are close to tautological for this task, so that comparison is part of the analysis. Metrics will also be reported on the measured-mass subset (`extrapolated == False`)
+6. Models: Start with scikit-learn baselines logistic regression and random forest, then try PyTorch MLP with hyperparameter tuning, learning curves, and feature importance
+7. Attempting to predict unusual data: predict decay modes for the 151 nuclides removed from data due to having no half-life
+
+## Progress
+
+- [x] Data downloaded and inspected
+- [x] Labels defined, data issues addressed (data issues discovered using 'get_data.py')
+- [x] Main features addressed ('src/features.py')
+- [x] Train/test split, baselines
+- [ ] Error analysis ('src/error_analysis.py')
+- [ ] PyTorch model, tuning, analysis
