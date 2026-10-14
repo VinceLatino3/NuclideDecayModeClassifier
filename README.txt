@@ -42,8 +42,9 @@ Notes regarding specific target outcomes:
 
 ## Project Approach
 
-- Dataset: 3,191 rows remaining after exclusions (see Data notes and exclusions)
-- Main (Tier 1) features: Z, N, A, N-Z, nuetron fraction, even/odd parity of Z and N, distance to nearest magic number 
+- Dataset: 3,191 rows with a measured half-life
+- Main (Tier 1) features: Z, N, A (Atomic mass number), N-Z, nuetron fraction, even/odd parity of Z and N, distance to nearest magic number
+    Ensured in features.py testing that beta_minus nuclides had higher neutron fraction, alpha emitters had largest mass number, and majority of stable nuclides are even-even. These are all commonly accepted nuclear physics principles to double check are data realtively fits assumptions
 - Exploratory (Tier 2) features (ablation): (mass-derived energies) binding energy, mass excess, separation energies
 - Evaluation: Include results of main features (accuracy, precision, recall, f1) and the same statistics for data including the mass derived features
 - Models: Start with scikit-learn baselines logistic regression and random forest, then try PyTorch MLP with hyperparameter tuning, learning curves, and feature importance
@@ -53,6 +54,6 @@ Notes regarding specific target outcomes:
 
 - [X] Data downloaded and inspected
 - [X] Labels defined, data issues addressed (data issues discovered using 'get_data.py')
-- [] Main features adressed ('src/features.py')
+- [X] Main features adressed ('src/features.py')
 - [] Train/test split, baselines
 - [] PyTorch model, tuning, analysis
