@@ -56,4 +56,5 @@ Notes regarding specific target outcomes:
 - [X] Labels defined, data issues addressed (data issues discovered using 'get_data.py')
 - [X] Main features adressed ('src/features.py')
 - [] Train/test split, baselines
+    Going forward with training I'll use two splits, random and element. Element accounts for the fact that some nuclides are near-identical, so its possible to test on a nearly-identical trained element.
 - [] PyTorch model, tuning, analysis
