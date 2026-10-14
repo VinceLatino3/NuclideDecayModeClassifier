@@ -61,7 +61,6 @@ Notes regarding specific target outcomes:
     - Some isotopes are near identical (Sn-120 and Sn-121), so I experimented with two different kinds of splits. RANDOM split is a traditional split that is purely random in separating train and test data. ELEMENT split addresses the similar isotope issue by sending all isotopes that share the same number of protons entirely to train or entirely to test (24 elements held out). It tests generalization to unseen elements, though neighboring elements remain in training, so it does not test unseen regions of the chart
     - The test sets are touched once, at the end; all model selection uses cross validation on the training portion
 4. Baselines: I use 3 baseline models (majority class, logistic regression, and random forest from sklearn) to compare against our final model created with PyTorch. Results of 5 fold cross validation on the training portion:
-
     | Model | Random split (acc / macro-F1) | Element split (acc / macro-F1) |
     |---|---|---|
     | Majority class | 0.384 / 0.111 | 0.383 / 0.111 |
@@ -69,6 +68,17 @@ Notes regarding specific target outcomes:
     | Random forest | 0.864 / 0.744 | 0.841 / 0.717 |
 
     Linear boundaries already reach about 80% accuracy and the forest's edge is mainly in macro-F1 (the small classes). The forest loses a few points when whole elements are held out while the linear model does not, which suggests a small neighbor-memorization effect, though the difference is close to fold-to-fold noise. Given these results our PyTorch model has the bar set at a macro-F1 of about 0.72 to 0.74 (random forest) depending on the split, with 0.59 to 0.62 as the linear floor
+
+    We compare against the random forest model with cross validated predictions on the training portion.
+    | Class | Random split | Element split |
+    |---|---|---|
+    | beta_minus | 0.913 / 0.951 / 0.932 | 0.900 / 0.956 / 0.927 |
+    | beta_plus_ec | 0.875 / 0.932 / 0.903 | 0.859 / 0.903 / 0.880 |
+    | alpha | 0.824 / 0.844 / 0.834 | 0.789 / 0.789 / 0.789 |
+    | stable | 0.699 / 0.595 / 0.643 | 0.678 / 0.534 / 0.597 |
+    | other | 0.652 / 0.301 / 0.411 | 0.568 / 0.319 / 0.409 |
+    Specific "other" decay_1 modes (element split with cross validated predictions on train; found / total): SF 21/48, P 13/47, 2P 9/11, N 2/8, double beta (2B-, 2B+, 2EC) 0/10, delayed emission (B-N, B-2N) 0/12, remaining modes 1/8. Spontaneous fission and proton emission are two thirds of the class. For Tier 2 ablation: expect adding separation energies (sp, sn) should lift proton and neutron emission while having little effect on fission predictions.
+
 5. Evaluation: Include results of main features (accuracy, macro-F1, per-class precision and recall) on both splits, and the same statistics for the Tier 2 ablation. Tier 2 adds mass-derived energies (binding energy, mass excess, separation energies, possibly Q-values) to measure how much they help; Q-values are close to tautological for this task, so that comparison is part of the analysis. Metrics will also be reported on the measured-mass subset (`extrapolated == False`)
 6. Models: Start with scikit-learn baselines logistic regression and random forest, then try PyTorch MLP with hyperparameter tuning, learning curves, and feature importance
 7. Attempting to predict unusual data: predict decay modes for the 151 nuclides removed from data due to having no half-life
@@ -79,5 +89,5 @@ Notes regarding specific target outcomes:
 - [x] Labels defined, data issues addressed (data issues discovered using 'get_data.py')
 - [x] Main features addressed ('src/features.py')
 - [x] Train/test split, baselines
-- [ ] Error analysis ('src/error_analysis.py')
+- [X] Error analysis ('src/error_analysis.py')
 - [ ] PyTorch model, tuning, analysis
