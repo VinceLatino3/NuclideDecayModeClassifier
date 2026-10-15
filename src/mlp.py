@@ -27,13 +27,14 @@ DEVICE = pick_device()
 
 
 class MLP(nn.Module):
-    def __init__(self, n_in, n_out, hidden=64, dropout=0.1):
+    def __init__(self, n_in, n_out, hidden=64, dropout=0.1, layers = 2):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(n_in, hidden), nn.ReLU(), nn.Dropout(dropout),
-            nn.Linear(hidden, hidden), nn.ReLU(), nn.Dropout(dropout),
-            nn.Linear(hidden, n_out),
-        )
+        blocks, size = [], n_in
+        for _ in range(layers):
+            blocks+= [nn.Linear(size, hidden), nn.ReLU(), nn.Dropout(dropout)]
+            size = hidden
+        blocks.append(nn.Linear(size, n_out))
+        self.net = nn.Sequential(*blocks)
 
     def forward(self, x):
         return self.net(x)
@@ -51,21 +52,21 @@ def prepare(train_df, val_df):
     return to_tensors(train_df), to_tensors(val_df)
 
 
-def class_weights(y):
+def class_weights(y, power=1.0):
     # inverse class frequency: rare classes count more in the loss
     counts = torch.bincount(y, minlength=len(LABELS)).float()
-    return counts.sum() / (len(LABELS) * counts)
+    return (counts.sum() / (len(LABELS) * counts)) ** power
 
 
 def train_mlp(train_df, val_df, epochs=300, patience=30, lr=1e-3,
-              weight_decay=1e-4, batch_size=64, use_class_weights=True):
+              weight_decay=1e-4, batch_size=64, use_class_weights=True, hidden=64, dropout=0.1, layers=2, weight_power=1.0):
     torch.manual_seed(SEED)
     (Xtr, ytr), (Xva, yva) = prepare(train_df, val_df)
     loader = DataLoader(TensorDataset(Xtr, ytr), batch_size=batch_size, shuffle=True)
     Xva_d = Xva.to(DEVICE)
 
-    model = MLP(Xtr.shape[1], len(LABELS)).to(DEVICE)
-    w = class_weights(ytr).to(DEVICE) if use_class_weights else None
+    model = MLP(Xtr.shape[1], len(LABELS), hidden, dropout, layers).to(DEVICE)
+    w = class_weights(ytr, weight_power).to(DEVICE) if use_class_weights else None
     loss_fn = nn.CrossEntropyLoss(weight=w)
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
