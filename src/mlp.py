@@ -40,12 +40,11 @@ class MLP(nn.Module):
         return self.net(x)
 
 
-def prepare(train_df, val_df):
-    # the scaler learns its mean/std from the training rows only
-    scaler = StandardScaler().fit(train_df[TIER1])
+def prepare(train_df, val_df, features):                       
+    scaler = StandardScaler().fit(train_df[features])          
 
     def to_tensors(df):
-        X = torch.tensor(scaler.transform(df[TIER1]), dtype=torch.float32)
+        X = torch.tensor(scaler.transform(df[features]), dtype=torch.float32)   
         y = torch.tensor(df["label"].map(LABEL_TO_ID).to_numpy(), dtype=torch.long)
         return X, y
 
@@ -59,9 +58,11 @@ def class_weights(y, power=1.0):
 
 
 def train_mlp(train_df, val_df, epochs=300, patience=30, lr=1e-3,
-              weight_decay=1e-4, batch_size=64, use_class_weights=True, hidden=64, dropout=0.1, layers=2, weight_power=1.0):
+              weight_decay=1e-4, batch_size=64, use_class_weights=True,
+              hidden=64, layers=2, dropout=0.1, weight_power=1.0,
+              features=TIER1):
     torch.manual_seed(SEED)
-    (Xtr, ytr), (Xva, yva) = prepare(train_df, val_df)
+    (Xtr, ytr), (Xva, yva) = prepare(train_df, val_df, features)
     loader = DataLoader(TensorDataset(Xtr, ytr), batch_size=batch_size, shuffle=True)
     Xva_d = Xva.to(DEVICE)
 
