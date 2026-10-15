@@ -79,9 +79,16 @@ Notes regarding specific target outcomes:
     | other | 0.652 / 0.301 / 0.411 | 0.568 / 0.319 / 0.409 |
     Specific "other" decay_1 modes (element split with cross validated predictions on train; found / total): SF 21/48, P 13/47, 2P 9/11, N 2/8, double beta (2B-, 2B+, 2EC) 0/10, delayed emission (B-N, B-2N) 0/12, remaining modes 1/8. Spontaneous fission and proton emission are two thirds of the class. For Tier 2 ablation: expect adding separation energies (sp, sn) should lift proton and neutron emission while having little effect on fission predictions.
 
-5. Evaluation: Include results of main features (accuracy, macro-F1, per-class precision and recall) on both splits, and the same statistics for the Tier 2 ablation. Tier 2 adds mass-derived energies (binding energy, mass excess, separation energies, possibly Q-values) to measure how much they help; Q-values are close to tautological for this task, so that comparison is part of the analysis. Metrics will also be reported on the measured-mass subset (`extrapolated == False`)
-6. Models: Start with scikit-learn baselines logistic regression and random forest, then try PyTorch MLP with hyperparameter tuning, learning curves, and feature importance
-7. Attempting to predict unusual data: predict decay modes for the 151 nuclides removed from data due to having no half-life
+6. Evaluation and Comparison: Include results of main features (accuracy, macro-F1, per-class precision and recall) on both splits, and the same statistics for the Tier 2 ablation. Tier 2 adds mass-derived energies (binding energy, mass excess, separation energies, possibly Q-values) to measure how much they help; Q-values are close to tautological for this task, so that comparison is part of the analysis. Metrics will also be reported on the measured-mass subset (`extrapolated == False`)
+    MLP (PyTorch, 2 hidden layers of 64, early stopping on inner validation split; untuned; same 5 folds):
+
+    | Model | Random split (acc / macro-F1) | Element split (acc / macro-F1) |
+    |---|---|---|
+    | Random forest | 0.864 / 0.744 | 0.841 / 0.717 |
+    | MLP, class weights | 0.827 / 0.749 | 0.834 / 0.765 |
+    | MLP, no class weights | 0.870 / 0.774 | 0.857 / 0.758 |
+
+    The MLP appears to match/modestly exceed the forest baseline, with gains concentrated in the 'stable' and 'other' classes. Inverse-frequency class weights raise recall on rare classes at a large cost in precision and do not meaningully improve macro-F1
 
 ## Progress
 
