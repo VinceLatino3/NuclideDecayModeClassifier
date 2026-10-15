@@ -27,8 +27,8 @@ def inner_split(fold_train, grouped):
                             stratify=fold_train["label"], random_state=SEED)
 
 
-def predict(model, scaler, df):
-    X = torch.tensor(scaler.transform(df[TIER1]), dtype=torch.float32).to(DEVICE)
+def predict(model, scaler, df, features=TIER1):                 # NEW: features
+    X = torch.tensor(scaler.transform(df[features]), dtype=torch.float32).to(DEVICE)   # NEW
     model.eval()
     with torch.no_grad():
         return model(X).argmax(dim=1).cpu().numpy()
