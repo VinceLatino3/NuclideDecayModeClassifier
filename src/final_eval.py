@@ -20,7 +20,7 @@ except ModuleNotFoundError:
     from mlp_cv import inner_split, predict
     from tier2 import LAYERS, MODELS
 
-MEASURED_ONLY = False                    # run once with False and once with True
+MEASURED_ONLY = True                    # run once with False and once with True
 N_BOOT = 1000
 SEEDS = [SEED + i for i in range(5)]     # training seeds; scores are averaged over these
 CODE = {lab: i for i, lab in enumerate(LABELS)}
