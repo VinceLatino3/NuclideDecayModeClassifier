@@ -1,6 +1,28 @@
 # Predicting Nuclide Decay Mode From Nuclear Structure
 
-Project Question: Given a nuclide's proton and neutron counts (potential to include mass-derived energies), can a model predict how its ground state primarily decays?
+
+## Summary
+
+**Question:** Can a model predict how a nuclide's ground state primarily decays (beta-minus, beta-plus/EC, alpha, stable, or other) from its proton and neutron counts, and what do mass-derived energies add?
+
+**Data and approach:** 3,191 nuclides from the IAEA Live Chart of Nuclides excluding columns that would leak the answer (half-lives, branching ratios, and columns whose missingness reveals the label). I compared a tuned random forest with a PyTorch MLP, using two test splits: a stratified random split and an element split in which all isotopes of an element are held out together, to test generalization to unseen elements. Models were chosen with cross validation; each test set was scored twice, once with a single seed pass and then again with a five seed-averaged pass.
+
+**Key results** (four-class macro-F1 over beta-minus, beta-plus/EC, alpha, and stable; Tier 1 features, all test rows):
+- Proton and neutron counts plus simple derived features reach about 0.85 to 0.86 on the random split and 0.83 to 0.87 on unseen elements. Including the small "other" class, five-class macro-F1 is about 0.80 on the random split and 0.74 to 0.78 on unseen elements.
+- The MLP and the forest are roughly tied. Neither wins consistently across splits and feature sets and differences are within noise.
+- Even/odd parity of Z and N is the most valuable engineered feature (+0.06 to +0.09); distance to the nearest magic number adds nothing measurable.
+- Decay Q-values lift both models by +0.06 to +0.10 (stable F1 from about 0.7 to 0.9+), and separation energies add a smaller, less consistent gain. Q-values nearly restate which decays are energetically allowed, so they are a ceiling experiment and not a like-for-like comparison.
+- Learning curves flatten after about 1,000 training rows; the limit looks set by the features and by ambiguity in decay modes, not by sample size.
+
+**Limitations:**
+- The test sets are small (about 640 rows, with 35 to 36 "other"), so intervals are wide (about +/-0.03 to 0.07), and results for "other" are indicative only.
+- "Other" mixes unrelated decay modes (proton emission, fission, double beta, delayed emission), and the rarer ones are essentially never predicted correctly.
+- About a quarter of the mass-derived values are extrapolated rather than measured; the energy results were checked on measured masses only and held up.
+- The element split still has neighboring elements in training, so it tests unseen elements but not unseen regions of the chart.
+- Hyperparameters were chosen on Tier 1 features and then frozen for the Tier 2 experiments, which may disadvantage the MLP. 151 nuclides with a decay mode but no measured half-life were excluded.
+
+Details, tables, and all intermediate results are below.
+
 
 ## Data Information
 
@@ -19,24 +41,30 @@ Contains 3,386 nuclides with 55 columns; raw file included in git, so no downloa
 
 ```
 MLNuclearPhysics/
-├── data/raw/              # untouched download
+├── data/raw/                  # untouched download (included in git)
 ├── data/processed/
-├── notebooks/             # exploration
-├── results/               # hyperparameter search results (CSV)
+├── notebooks/                 # exploration
+├── results/                   # CSVs: searches, ablations, importance, final evaluation
+├── figures/                   # learning curves, error chart
 ├── src/
-│   ├── get_data.py        # load data, build labels
-│   ├── features.py        # Tier 1 features, load_main_dataset()
-│   ├── split.py           # random and element train/test splits
-│   ├── baselines.py       # majority class, logistic regression, random forest
-│   ├── error_analysis.py  # per-class errors of the default forest
-│   ├── mlp.py             # PyTorch MLP and training loop
-│   ├── mlp_cv.py          # MLP cross validation
-│   ├── tune_mlp.py        # MLP random search
-│   ├── tune_rf.py         # random forest random search
-│   ├── compare.py         # repeated-CV model comparison  
-│   ├── tier2.py           # tier 2 features loaded in
-│   ├── other_modes.py     
-│   └── finaleval.py       # Outputs final statistics comparing MLP with random forest
+│   ├── get_data.py            # load data, build labels
+│   ├── features.py            # Tier 1 features, load_main_dataset()
+│   ├── split.py               # random and element train/test splits
+│   ├── baselines.py           # majority class, logistic regression, random forest
+│   ├── error_analysis.py      # per-class errors of the default forest
+│   ├── mlp.py                 # PyTorch MLP and training loop
+│   ├── mlp_cv.py              # MLP cross validation
+│   ├── tune_mlp.py            # MLP random search
+│   ├── tune_rf.py             # random forest random search
+│   ├── compare.py             # repeated-CV model comparison
+│   ├── tier2_check.py         # missingness and units check for the energy columns
+│   ├── tier2.py               # Tier 2 ablation (cross validation)
+│   ├── other_modes.py         # "other" class by sub-mode
+│   ├── final_eval.py          # test-set evaluation: 5 seeds, bootstrap, paired contrasts
+│   ├── feature_ablation.py    # Tier 1 feature groups
+│   ├── importance.py          # permutation importance by feature group
+│   ├── learning_curves.py     # learning curves
+│   └── error_chart.py         # chart of test-set errors
 ├── requirements.txt
 └── README.md
 ```
@@ -62,7 +90,7 @@ Notes regarding specific target outcomes:
 ## Data notes and exclusions
 
 - Columns: half-life, decay branching, and uncertainty have an immediate relationship with decay and are thus excluded. Furthermore, columns: abundance, radius, and nuclear moments are only filled for long-lasting nuclides, so even their missingness reveals the label, and they are also dropped. Columns with few entries are also dropped
-- Some nuclide masses appear to be estimated from systematics rather than measured (interpreting `me_systematics == 'Y'` in the data this way, based on the column name and pattern, not documentation). None of the stable nuclides have estimated masses, so we eliminate this column along with the mass uncertainty columns as features. It is kept only as an evaluation flag. Potential to revisit in evaluation
+- Some nuclide masses appear to be estimated from systematics rather than measured (interpreting `me_systematics == 'Y'` in the data this way, based on the column name and pattern, not documentation). None of the stable nuclides have estimated masses, so we eliminate this column along with the mass uncertainty columns as features. It is kept only as an evaluation flag. Evaluation was repeated on measured-mass rows only (see 6. and 7.)
 - 151 labeled rows have a decay mode but no measured half-life. 119 of them also have estimated masses and 119 are beta-minus, which suggests these modes are assumed or predicted rather than directly observed (my inference from the pattern, not stated by the database). Their labels are less reliable, so they are excluded from training and testing. Comparing the model's predictions against their listed modes is left as possible future work
 
 ## Project Approach
@@ -72,7 +100,7 @@ Notes regarding specific target outcomes:
     - Ensured in features.py testing that beta_minus nuclides had higher neutron fraction, alpha emitters had largest mass number, and the majority of stable nuclides are even-even. These are all commonly accepted nuclear physics principles, checked to confirm our data relatively fits assumptions
 3. Establishing Train/Test split: Set aside 20% of data as test (stratified by label), then train on the remaining 80% using 5 fold cross validation
     - Some isotopes are near identical (Sn-120 and Sn-121), so I experimented with two different kinds of splits. RANDOM split is a traditional split that is purely random in separating train and test data. ELEMENT split addresses the similar isotope issue by sending all isotopes that share the same number of protons entirely to train or entirely to test (24 elements held out). It tests generalization to unseen elements, though neighboring elements remain in training, so it does not test unseen regions of the chart
-    - The test sets are touched once, at the end; all model selection uses cross validation on the training portion
+    - The test sets are only used for final models and figures, at the end; all model selection uses cross validation on the training portion
 4. Baselines: I use 3 baseline models (majority class, logistic regression, and random forest from sklearn, all with default settings) to compare against our final model created with PyTorch. Results of a single 5 fold cross validation on the training portion:
 
     | Model | Random split (acc / macro-F1) | Element split (acc / macro-F1) |
@@ -111,38 +139,38 @@ Notes regarding specific target outcomes:
     | MLP, default, inverse-frequency class weights | 0.760 +/- 0.025 | 0.760 +/- 0.026 |
     | MLP, 3 best searched configurations | 0.775 to 0.782 | 0.764 to 0.772 |
 
-    The tuned forest and the default MLP are statistically tied (the MLP wins 9/15 folds on the random split and 6/15 on the element split). Tuning mattered for the forest, mainly through class weighting, and not for the MLP: before looking at results I set a bar of a mean gain of at least about 0.01 on both splits over the default, and none of the three best configurations cleared it. Class weights raise recall on rare classes at a large cost in precision, so they are a different operating point and not a better one. With class weighting, the forest's drop from the random to the element split shrinks to about 0.007, so there is little evidence of neighbor memorization.
+    The tuned forest and the default MLP are close (mean differences of +0.003 and -0.002 in five-class macro-F1; the MLP wins 9/15 and 6/15 folds).. Tuning mattered for the forest, mainly through class weighting, and not for the MLP: before looking at results I set a bar of a mean gain of at least about 0.01 on both splits over the default, and none of the three best configurations cleared it. Class weights raise recall on rare classes at a large cost in precision, so they are a different operating point and not a better one. With class weighting, the forest's drop from the random to the element split shrinks to about 0.007, so there is little evidence of neighbor memorization.
 
     Final settings, frozen before the Tier 2 ablation (chosen using Tier 1 features): MLP with the defaults above and no class weights; random forest with the tuned settings above.
 
-6. Tier 2 ablation (planned): add mass-derived energies to measure how much they help, in layers because Q-values are close to tautological for this task: Tier 1 + binding energy and mass excess + neutron and proton separation energies (sn, sp) + decay Q-values (qa, qec, qbm, qbm_n). Hyperparameters stay frozen so differences come from the features. 
-    Cross validation on the training portion (3 shuffles x 5 folds). Measure macro-F1 over the four main classes (beta_minus, beta_plus_ec, alpha, stable), "other" has only 24 to 47 rows in the later blocks and is too noisy to average in. Rows shown are those complete through Q-values.
+6. Tier 2 ablation: add mass-derived energies in layers, because Q-values are close to a restatement of which decays are energetically allowed: Tier 1; + binding energy per nucleon and mass excess; + neutron and proton separation energies (sn, sp); + decay Q-values (qa, qec, qbm, qbm_n). Missingness in these columns depends on the label (for example qbm is blank for 21% of alpha rows and 0% of beta_minus rows), so missing-value indicators are not used, and requiring every column would remove 69% of "other" rows (179 to 56). Instead each layer is evaluated on the rows complete through that layer, with all lower layers re-scored on the same rows, so numbers are comparable within a block but not across blocks. Hyperparameters stay frozen (chosen on Tier 1 features) so differences come from the features.
 
-        Measured-mass rows only (`extrapolated == False`):
+    Cross validation on the training portion (3 shuffles x 5 folds). Metric: macro-F1 over the four main classes (beta_minus, beta_plus_ec, alpha, stable), because "other" has only 24 to 47 rows in the later blocks and is too noisy to average in. The tables below show the last block (rows complete through Q-values).
+    
+    Measured-mass rows only (`extrapolated == False`):
 
-        | Split | Model | Tier 1 | + mass | + sep | + Q |
-        |---|---|---|---|---|---|
-        | Random | MLP | 0.823 | 0.831 | 0.864 | 0.883 |
-        | Random | RF | 0.836 | 0.836 | 0.861 | 0.935 |
-        | Element | MLP | 0.800 | 0.820 | 0.870 | 0.888 |
-        | Element | RF | 0.814 | 0.826 | 0.856 | 0.934 |
+    | Split | Model | Tier 1 | + mass | + sep | + Q |
+    |---|---|---|---|---|---|
+    | Random | MLP | 0.823 | 0.831 | 0.864 | 0.883 |
+    | Random | RF | 0.836 | 0.836 | 0.861 | 0.935 |
+    | Element | MLP | 0.800 | 0.820 | 0.870 | 0.888 |
+    | Element | RF | 0.814 | 0.826 | 0.856 | 0.934 |
 
-        All rows (including extrapolated masses):
+    All rows (including extrapolated masses):
 
-        | Split | Model | Tier 1 | + mass | + sep | + Q |
-        |---|---|---|---|---|---|
-        | Random | MLP | 0.821 | 0.837 | 0.866 | 0.896 |
-        | Random | RF | 0.844 | 0.841 | 0.864 | 0.935 |
-        | Element | MLP | 0.815 | 0.822 | 0.859 | 0.875 |
-        | Element | RF | 0.826 | 0.828 | 0.858 | 0.938 |
+    | Split | Model | Tier 1 | + mass | + sep | + Q |
+    |---|---|---|---|---|---|
+    | Random | MLP | 0.821 | 0.837 | 0.866 | 0.896 |
+    | Random | RF | 0.844 | 0.841 | 0.864 | 0.935 |
+    | Element | MLP | 0.815 | 0.822 | 0.859 | 0.875 |
+    | Element | RF | 0.826 | 0.828 | 0.858 | 0.938 |
 
-        Findings:
-        - Binding energy and mass excess alone do not help (0 to +0.02 within noise).
-        - Separation energies help both models about equally (+0.02 to +0.07 four-class macro-F1), and the gain holds on measured masses, so it is not an artifact of extrapolated values.
-        - Q-values lift the random forest strongly (stable F1 about 0.70 to 0.94, alpha about 0.77 to 0.85, beta_plus_ec about 0.89 to 0.96 on measured masses) but the MLP much less (+0.02), so the forest leads once Q-values are included.
-        - With Tier 1 features alone the MLP and the tuned forest are tied.
-        - In "other", a single-shuffle check (element split, all rows) showed proton emission going from 17/36 to 32/36 caught when separation energies were added, consistent with the hypothesis above, while fission moved only from 20/40 to 23/40 and double beta, delayed emission, and the remaining rare modes were never caught. Extrapolated masses and "other" is small, so it is suggestive only.
-
+    Findings (cross-validation findings, these results precede and are overuled by what is found in 7.):
+    - Binding energy and mass excess alone do not help (0 to +0.02 within noise).
+    - Separation energies help both models about equally (+0.02 to +0.07 four-class macro-F1), and the gain holds on measured masses, so it is not an artifact of extrapolated values.
+    - Q-values lift the random forest strongly (stable F1 about 0.70 to 0.94, alpha about 0.77 to 0.85, beta_plus_ec about 0.89 to 0.96 on measured masses) and the MLP less (about +0.02 over separation energies), so the forest led by 0.04 to 0.06 in cross validation; on the test sets (item 7) the MLP gains +0.06 to +0.10 and the gap to the forest is indistinguishable from zero.
+    - With Tier 1 features alone the MLP and the tuned forest are tied.
+    - In "other", a single-shuffle check (element split, all rows, tuned forest) showed proton emission going from 17/36 to 32/36 caught when separation energies were added, consistent with the hypothesis above, while fission moved only from 20/40 to 23/40. Double beta and the remaining singleton modes were never caught, and delayed emission was only partly caught (B-N 2/6 and B-2N 2/4 with Tier 1 features; 0/6 and 2/4 with separation energies). This check includes extrapolated masses and "other" is small, so it is suggestive only.
 7. Final evaluation on the held-out test sets (run after all model and feature decisions were frozen; each test set was scored for the final models only). Every model is trained with 5 seeds (network initialization and early-stopping split for the MLP; forest seed) and scores are averaged over seeds. 95% intervals come from a bootstrap of the test set (resampling rows on the random split and whole elements on the element split); differences between models or layers are paired bootstrap contrasts on the same test rows. A first single-seed pass was seen before seed averaging was adopted, because single MLP runs moved by about 0.02 between nearly identical blocks (MLP seed standard deviations are 0.005 to 0.04, versus at most 0.008 for the forest); conclusions did not change materially, and the seed-averaged numbers are the ones reported. Test sets are small (about 640 rows, with 35 to 36 "other"), so "other" is shown for completeness only and the four-class macro-F1 (beta_minus, beta_plus_ec, alpha, stable) is the main metric.
 
     Tier 1 features, all test rows:
@@ -184,7 +212,7 @@ Notes regarding specific target outcomes:
     - Separation energies help the MLP clearly in every setting and the forest on the random split, but the forest's gain on the element split is small and not distinguishable from zero.
     - Binding energy and mass excess alone have no consistent effect (at most a small, inconsistent MLP gain of about +0.02).
     - Neither model is consistently better. At Tier 1 the MLP is slightly ahead on the random split and the forest slightly ahead on the element split (-0.017 to -0.041 for the MLP, clearly excluding zero in only one of eight overlapping blocks); with Q-values the forest is ahead by at most 0.02, not distinguishable from zero.
-    - Fission and the rare modes (double beta, delayed emission) are not helped by any feature set.
+    - Fission and the rare modes (double beta, delayed emission) were not clearly helped by separation energies in the cross-validation sub-mode check (6.); the test sets are too small to check this.
 
 
 8. Further analysis (cross validation on the training portion only; test sets not used).
@@ -217,6 +245,11 @@ Notes regarding specific target outcomes:
 
     **Learning curves** (`figures/learning_curves.png`): four-class F1 rises quickly up to roughly 800 to 1,200 training rows and then flattens (Tier 1: about 0.77 to 0.84 on the random split and 0.75 to 0.82 on the element split; with separation energies: about 0.80 to 0.87 and 0.77-0.80 to 0.86). The last step from 80% to 100% of the training rows adds only +0.003 to +0.030, mostly within noise, so the ceiling appears to be set by the features and by how ambiguous decay modes are, not by sample size.
 
+    **Where the errors are** (`figures/error_chart.png`; tuned forest, one seed, test nuclides complete through Q-values): errors fall from 62 to 23 of 535 (random split) and from 62 to 29 of 547 (element split) when Q-values are added. With Tier 1 features the errors are spread along the valley of stability, including 10 to 15 misclassified stable nuclides; with Q-values the stable errors almost vanish, and the remaining ones are mostly "other" (concentrated at the light and heavy ends of the chart) and alpha emitters, including a cluster around Z of about 62 to 76 and N of about 84 to 92 that I did not investigate. In the element-split panels the horizontal bands are the held-out elements.
+
+    ![Test-set errors on the chart of the nuclides](figures/error_chart.png)
+    ![Learning curves](figures/learning_curves.png)
+
 ## Progress
 
 - [x] Data downloaded and inspected
@@ -227,4 +260,5 @@ Notes regarding specific target outcomes:
 - [x] PyTorch MLP creation and tuning, random forest tuning, repeated-CV comparison
 - [X] Tier 2 features and ablation
 - [X] Final test-set evaluation, learning curves, feature importance
-- [ ] Final write-up
+- [X] Final write-up
+
