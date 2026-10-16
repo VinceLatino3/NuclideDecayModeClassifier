@@ -33,7 +33,10 @@ MLNuclearPhysics/
 │   ├── mlp_cv.py          # MLP cross validation
 │   ├── tune_mlp.py        # MLP random search
 │   ├── tune_rf.py         # random forest random search
-│   └── compare.py         # repeated-CV model comparison
+│   ├── compare.py         # repeated-CV model comparison  
+│   ├── tier2.py           # tier 2 features loaded in
+│   ├── other_modes.py     
+│   └── finaleval.py 
 ├── requirements.txt
 └── README.md
 ```
@@ -112,7 +115,34 @@ Notes regarding specific target outcomes:
 
     Final settings, frozen before the Tier 2 ablation (chosen using Tier 1 features): MLP with the defaults above and no class weights; random forest with the tuned settings above.
 
-6. Tier 2 ablation (planned): add mass-derived energies to measure how much they help, in layers because Q-values are close to tautological for this task: Tier 1; + binding energy and mass excess; + neutron and proton separation energies (sn, sp); + decay Q-values (qa, qec, qbm, qbm_n). Hyperparameters stay frozen so differences come from the features. All tiers will be compared on the same rows (those complete in every Tier 2 column), after checking whether missingness in these columns tracks the label. Metrics will also be reported on the measured-mass subset (`extrapolated == False`) and per class, to test the hypothesis above.
+6. Tier 2 ablation (planned): add mass-derived energies to measure how much they help, in layers because Q-values are close to tautological for this task: Tier 1 + binding energy and mass excess + neutron and proton separation energies (sn, sp) + decay Q-values (qa, qec, qbm, qbm_n). Hyperparameters stay frozen so differences come from the features. 
+    Cross validation on the training portion (3 shuffles x 5 folds). Measure macro-F1 over the four main classes (beta_minus, beta_plus_ec, alpha, stable), "other" has only 24 to 47 rows in the later blocks and is too noisy to average in. Rows shown are those complete through Q-values.
+
+        Measured-mass rows only (`extrapolated == False`):
+
+        | Split | Model | Tier 1 | + mass | + sep | + Q |
+        |---|---|---|---|---|---|
+        | Random | MLP | 0.823 | 0.831 | 0.864 | 0.883 |
+        | Random | RF | 0.836 | 0.836 | 0.861 | 0.935 |
+        | Element | MLP | 0.800 | 0.820 | 0.870 | 0.888 |
+        | Element | RF | 0.814 | 0.826 | 0.856 | 0.934 |
+
+        All rows (including extrapolated masses):
+
+        | Split | Model | Tier 1 | + mass | + sep | + Q |
+        |---|---|---|---|---|---|
+        | Random | MLP | 0.821 | 0.837 | 0.866 | 0.896 |
+        | Random | RF | 0.844 | 0.841 | 0.864 | 0.935 |
+        | Element | MLP | 0.815 | 0.822 | 0.859 | 0.875 |
+        | Element | RF | 0.826 | 0.828 | 0.858 | 0.938 |
+
+        Findings:
+        - Binding energy and mass excess alone do not help (0 to +0.02 within noise).
+        - Separation energies help both models about equally (+0.02 to +0.07 four-class macro-F1), and the gain holds on measured masses, so it is not an artifact of extrapolated values.
+        - Q-values lift the random forest strongly (stable F1 about 0.70 to 0.94, alpha about 0.77 to 0.85, beta_plus_ec about 0.89 to 0.96 on measured masses) but the MLP much less (+0.02), so the forest leads once Q-values are included.
+        - With Tier 1 features alone the MLP and the tuned forest are tied.
+        - In "other", a single-shuffle check (element split, all rows) showed proton emission going from 17/36 to 32/36 caught when separation energies were added, consistent with the hypothesis above, while fission moved only from 20/40 to 23/40 and double beta, delayed emission, and the remaining rare modes were never caught. Extrapolated masses and "other" is small, so it is suggestive only.
+
 7. Final evaluation (planned): score the final models once on each test set (accuracy, macro-F1, per-class precision and recall), plus learning curves and permutation feature importance.
 
 ## Progress
