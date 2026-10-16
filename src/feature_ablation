@@ -1,0 +1,46 @@
+import numpy as np
+import pandas as pd
+from sklearn.metrics import f1_score
+
+try:
+    from src.features import load_main_dataset, TIER1
+    from src.split import random_split, element_split
+    from src.mlp import LABELS
+    from src.tier2 import run_model, MODELS
+except ModuleNotFoundError:
+    from features import load_main_dataset, TIER1
+    from split import random_split, element_split
+    from mlp import LABELS
+    from tier2 import run_model, MODELS
+
+BASE = ["z", "n"]
+DERIVED = ["A", "n_minus_z", "n_frac"]
+PARITY = ["z_even", "n_even"]
+SETS = [
+    ("Z, N only", BASE),
+    ("+ A, N-Z, N/A", BASE + DERIVED),
+    ("+ parity", BASE + DERIVED + PARITY),
+    ("+ magic distance (= Tier 1)", TIER1),
+]
+
+if __name__ == "__main__":
+    df = load_main_dataset()
+    rows = []
+    for split_name, split_fn, grouped in [("RANDOM", random_split, False),
+                                          ("ELEMENT", element_split, True)]:
+        train, _ = split_fn(df)             # test set deliberately ignored
+        for model_name, (kind, params) in MODELS.items():
+            for set_name, feats in SETS:
+                f1s, true, pred = run_model(train, grouped, feats, kind, params)
+                per_class = f1_score(true, pred, labels=LABELS, average=None, zero_division=0)
+                rows.append({"split": split_name, "model": model_name, "features": set_name,
+                             "macro_f1": np.mean(f1s), "std": np.std(f1s),
+                             "macro_f1_4class": per_class[:4].mean(),
+                             **{f"f1_{lab}": v for lab, v in zip(LABELS, per_class)}})
+                print(f"{split_name:7s} {model_name:3s} {set_name:30s} "
+                      f"4-class {per_class[:4].mean():.3f}", flush=True)
+
+    out = pd.DataFrame(rows)
+    print()
+    print(out.round(3).to_string(index=False))
+    out.to_csv("results/feature_ablation.csv", index=False)

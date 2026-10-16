@@ -36,7 +36,7 @@ MLNuclearPhysics/
 │   ├── compare.py         # repeated-CV model comparison  
 │   ├── tier2.py           # tier 2 features loaded in
 │   ├── other_modes.py     
-│   └── finaleval.py 
+│   └── finaleval.py       # Outputs final statistics comparing MLP with random forest
 ├── requirements.txt
 └── README.md
 ```
@@ -143,7 +143,79 @@ Notes regarding specific target outcomes:
         - With Tier 1 features alone the MLP and the tuned forest are tied.
         - In "other", a single-shuffle check (element split, all rows) showed proton emission going from 17/36 to 32/36 caught when separation energies were added, consistent with the hypothesis above, while fission moved only from 20/40 to 23/40 and double beta, delayed emission, and the remaining rare modes were never caught. Extrapolated masses and "other" is small, so it is suggestive only.
 
-7. Final evaluation (planned): score the final models once on each test set (accuracy, macro-F1, per-class precision and recall), plus learning curves and permutation feature importance.
+7. Final evaluation on the held-out test sets (run after all model and feature decisions were frozen; each test set was scored for the final models only). Every model is trained with 5 seeds (network initialization and early-stopping split for the MLP; forest seed) and scores are averaged over seeds. 95% intervals come from a bootstrap of the test set (resampling rows on the random split and whole elements on the element split); differences between models or layers are paired bootstrap contrasts on the same test rows. A first single-seed pass was seen before seed averaging was adopted, because single MLP runs moved by about 0.02 between nearly identical blocks (MLP seed standard deviations are 0.005 to 0.04, versus at most 0.008 for the forest); conclusions did not change materially, and the seed-averaged numbers are the ones reported. Test sets are small (about 640 rows, with 35 to 36 "other"), so "other" is shown for completeness only and the four-class macro-F1 (beta_minus, beta_plus_ec, alpha, stable) is the main metric.
+
+    Tier 1 features, all test rows:
+
+    | Split | Model | 5-class macro-F1 | 4-class macro-F1 [95% CI] |
+    |---|---|---|---|
+    | Random | MLP | 0.801 | 0.857 [0.825, 0.885] |
+    | Random | RF | 0.801 | 0.851 [0.817, 0.880] |
+    | Element | MLP | 0.740 | 0.826 [0.771, 0.873] |
+    | Element | RF | 0.784 | 0.867 [0.825, 0.903] |
+
+    MLP minus RF (4-class, paired): random +0.006 [-0.027, +0.041]; element -0.041 [-0.075, -0.005].
+
+    Per-class F1, Tier 1, all test rows:
+
+    | Split | Model | beta_minus | beta_plus_ec | alpha | stable | other |
+    |---|---|---|---|---|---|---|
+    | Random | MLP | 0.961 | 0.905 | 0.810 | 0.752 | 0.576 |
+    | Random | RF | 0.939 | 0.904 | 0.858 | 0.702 | 0.604 |
+    | Element | MLP | 0.943 | 0.877 | 0.757 | 0.727 | 0.396 |
+    | Element | RF | 0.940 | 0.902 | 0.867 | 0.760 | 0.451 |
+
+    Tier 2 ablation, gain in 4-class macro-F1 over Tier 1 on the same test rows (paired, 95% CI; rows complete through Q-values, so 535 / 478 / 547 / 470 test rows):
+
+    | Test rows | Model | + mass | + sep | + Q |
+    |---|---|---|---|---|
+    | Random, all | MLP | -0.002 [-0.018, +0.014] | +0.057 [+0.038, +0.078] | +0.061 [+0.041, +0.084] |
+    | Random, all | RF | +0.007 [-0.010, +0.025] | +0.053 [+0.026, +0.080] | +0.102 [+0.071, +0.134] |
+    | Random, measured | MLP | -0.003 [-0.023, +0.015] | +0.026 [+0.005, +0.049] | +0.062 [+0.040, +0.086] |
+    | Random, measured | RF | +0.003 [-0.016, +0.023] | +0.046 [+0.018, +0.074] | +0.097 [+0.068, +0.128] |
+    | Element, all | MLP | +0.009 [-0.012, +0.032] | +0.058 [+0.022, +0.101] | +0.094 [+0.042, +0.154] |
+    | Element, all | RF | -0.014 [-0.057, +0.028] | +0.011 [-0.029, +0.049] | +0.075 [+0.042, +0.120] |
+    | Element, measured | MLP | +0.023 [+0.000, +0.054] | +0.076 [+0.038, +0.125] | +0.101 [+0.050, +0.160] |
+    | Element, measured | RF | -0.011 [-0.050, +0.028] | +0.016 [-0.026, +0.055] | +0.084 [+0.045, +0.146] |
+
+    Findings:
+    - Test scores are in line with cross validation, so model selection on cross validation did not overfit.
+    - Decay Q-values lift both models clearly in all eight settings (+0.06 to +0.10), including on measured masses; stable F1 rises from 0.69 to 0.79 at Tier 1 to 0.91 to 0.95. Q-values are close to a restatement of which decays are energetically allowed, so this is a ceiling experiment and not a like-for-like comparison.
+    - Separation energies help the MLP clearly in every setting and the forest on the random split, but the forest's gain on the element split is small and not distinguishable from zero.
+    - Binding energy and mass excess alone have no consistent effect (at most a small, inconsistent MLP gain of about +0.02).
+    - Neither model is consistently better. At Tier 1 the MLP is slightly ahead on the random split and the forest slightly ahead on the element split (-0.017 to -0.041 for the MLP, clearly excluding zero in only one of eight overlapping blocks); with Q-values the forest is ahead by at most 0.02, not distinguishable from zero.
+    - Fission and the rare modes (double beta, delayed emission) are not helped by any feature set.
+
+
+8. Further analysis (cross validation on the training portion only; test sets not used).
+
+    **Feature ablation** (four-class macro-F1; 3 shuffles x 5 folds; the MLP uses one seed per fold):
+
+    | Split | Model | Z, N only | + A, N-Z, N/A | + parity | + magic distance (= Tier 1) |
+    |---|---|---|---|---|---|
+    | Random | MLP | 0.736 | 0.760 | 0.831 | 0.843 |
+    | Random | RF | 0.774 | 0.777 | 0.844 | 0.840 |
+    | Element | MLP | 0.758 | 0.764 | 0.822 | 0.821 |
+    | Element | RF | 0.678 | 0.746 | 0.832 | 0.831 |
+
+    Even/odd parity of Z and N is the most valuable engineered feature (+0.06 to +0.09; stable F1 rises from 0.51-0.56 to 0.71-0.74), consistent with nuclear pairing. Distance to the nearest magic number adds nothing measurable, and the derived A, N-Z, N/A features help mainly the forest on the element split (+0.07). Z and N alone are clearly worse than with Tier 1 features.
+
+    **Permutation importance** (drop in four-class F1 when a whole feature group is shuffled jointly in held-out folds, 10 repeats):
+
+    | Block | Split | Model | Tier 1 structure | Mass surface | Separation | Q-values |
+    |---|---|---|---|---|---|---|
+    | +sep | Random | MLP | 0.340 | 0.211 | 0.407 | |
+    | +sep | Random | RF | 0.259 | 0.161 | 0.344 | |
+    | +sep | Element | MLP | 0.317 | 0.211 | 0.401 | |
+    | +sep | Element | RF | 0.261 | 0.136 | 0.354 | |
+    | +Q | Random | MLP | 0.175 | 0.184 | 0.162 | 0.478 |
+    | +Q | Random | RF | 0.027 | 0.039 | 0.007 | 0.615 |
+    | +Q | Element | MLP | 0.156 | 0.168 | 0.145 | 0.447 |
+    | +Q | Element | RF | 0.034 | 0.034 | 0.013 | 0.621 |
+
+    When Q-values are available the forest relies on them almost entirely (shuffling them cuts four-class F1 by about 0.6, most for stable), while the MLP spreads its reliance across all groups. Importance describes what a model relies on and is not the same as added information: the mass surface has importance 0.14 to 0.21 at `+sep` although adding it changed no scores, because it largely duplicates information already in Tier 1. Shuffling whole groups also creates unrealistic feature combinations, which exaggerates the drops.
+
+    **Learning curves** (`figures/learning_curves.png`): four-class F1 rises quickly up to roughly 800 to 1,200 training rows and then flattens (Tier 1: about 0.77 to 0.84 on the random split and 0.75 to 0.82 on the element split; with separation energies: about 0.80 to 0.87 and 0.77-0.80 to 0.86). The last step from 80% to 100% of the training rows adds only +0.003 to +0.030, mostly within noise, so the ceiling appears to be set by the features and by how ambiguous decay modes are, not by sample size.
 
 ## Progress
 
@@ -153,6 +225,6 @@ Notes regarding specific target outcomes:
 - [x] Train/test split, baselines
 - [x] Error analysis ('src/error_analysis.py')
 - [x] PyTorch MLP creation and tuning, random forest tuning, repeated-CV comparison
-- [ ] Tier 2 features and ablation
-- [ ] Final test-set evaluation, learning curves, feature importance
+- [X] Tier 2 features and ablation
+- [X] Final test-set evaluation, learning curves, feature importance
 - [ ] Final write-up
