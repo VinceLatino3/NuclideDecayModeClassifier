@@ -17,18 +17,17 @@ except ModuleNotFoundError:
     from mlp import train_mlp, LABELS, LABEL_TO_ID, DEVICE
 
 
-def inner_split(fold_train, grouped):
-    # carve an early-stopping validation set out of the fold's training rows
+def inner_split(fold_train, grouped, seed=SEED):                
     if grouped:
-        sgkf = StratifiedGroupKFold(n_splits=6, shuffle=True, random_state=SEED)
+        sgkf = StratifiedGroupKFold(n_splits=6, shuffle=True, random_state=seed)     
         tr_idx, va_idx = next(sgkf.split(fold_train, fold_train["label"], groups=fold_train["z"]))
         return fold_train.iloc[tr_idx], fold_train.iloc[va_idx]
     return train_test_split(fold_train, test_size=0.15,
-                            stratify=fold_train["label"], random_state=SEED)
+                            stratify=fold_train["label"], random_state=seed)
 
 
-def predict(model, scaler, df, features=TIER1):                 # NEW: features
-    X = torch.tensor(scaler.transform(df[features]), dtype=torch.float32).to(DEVICE)   # NEW
+def predict(model, scaler, df, features=TIER1):                
+    X = torch.tensor(scaler.transform(df[features]), dtype=torch.float32).to(DEVICE)   
     model.eval()
     with torch.no_grad():
         return model(X).argmax(dim=1).cpu().numpy()

@@ -20,8 +20,9 @@ except ModuleNotFoundError:
     from mlp_cv import inner_split, predict
     from tier2 import LAYERS, MODELS
 
-MEASURED_ONLY = True    
+MEASURED_ONLY = False                    # run once with False and once with True
 N_BOOT = 1000
+SEEDS = [SEED + i for i in range(5)]     # training seeds; scores are averaged over these
 CODE = {lab: i for i, lab in enumerate(LABELS)}
 
 
@@ -40,40 +41,61 @@ def f1_vector(t, p):
     return f1
 
 
-def bootstrap(t, p, groups, n=N_BOOT):
-    # 95% interval for (5-class, 4-class) macro-F1; resamples rows, or whole elements if groups given
+def score(t, ps):
+    # (5-class, 4-class) macro-F1, averaged over the per-seed predictions in ps
+    f1s = [f1_vector(t, p) for p in ps]
+    return (np.mean([np.nanmean(f) for f in f1s]),
+            np.mean([np.nanmean(f[:4]) for f in f1s]))
+
+
+def make_boots(t, groups):
+    # bootstrap index sets: rows (random split) or whole elements (element split)
     rng = np.random.default_rng(SEED)
-    if groups is not None:
-        members = {g: np.flatnonzero(groups == g) for g in np.unique(groups)}
-        keys = np.array(list(members))
-    stats = []
-    for _ in range(n):
-        if groups is None:
-            idx = rng.integers(0, len(t), len(t))
-        else:
-            idx = np.concatenate([members[g] for g in rng.choice(keys, len(keys))])
-        f1 = f1_vector(t[idx], p[idx])
-        stats.append((np.nanmean(f1), np.nanmean(f1[:4])))
-    return np.percentile(stats, [2.5, 97.5], axis=0)   # row 0 = low, row 1 = high
+    if groups is None:
+        return [rng.integers(0, len(t), len(t)) for _ in range(N_BOOT)]
+    members = {g: np.flatnonzero(groups == g) for g in np.unique(groups)}
+    keys = np.array(list(members))
+    return [np.concatenate([members[g] for g in rng.choice(keys, len(keys))])
+            for _ in range(N_BOOT)]
+
+
+def ci4(t, ps, boots):
+    vals = [score(t[i], [p[i] for p in ps])[1] for i in boots]
+    return np.percentile(vals, [2.5, 97.5])
+
+
+def diff_ci(t, ps_a, ps_b, boots):
+    # paired difference in four-class macro-F1: both sets are scored on the same resamples
+    point = score(t, ps_a)[1] - score(t, ps_b)[1]
+    d = [score(t[i], [p[i] for p in ps_a])[1] - score(t[i], [p[i] for p in ps_b])[1]
+         for i in boots]
+    lo, hi = np.percentile(d, [2.5, 97.5])
+    return point, lo, hi
 
 
 def fit_predict(tr, te, grouped, feats, kind, params):
-    if kind == "mlp":
-        fit, val = inner_split(tr, grouped)             # early-stopping set, from train only
-        with redirect_stdout(io.StringIO()):
-            model, _ = train_mlp(fit, val, features=feats, **params)
-        scaler = StandardScaler().fit(fit[feats])
-        return np.array(LABELS)[predict(model, scaler, te, feats)]
-    rf = RandomForestClassifier(random_state=SEED, n_jobs=-1, **params)
-    rf.fit(tr[feats], tr["label"])
-    return rf.predict(te[feats])
+    # one prediction array per training seed
+    preds = []
+    for s in SEEDS:
+        if kind == "mlp":
+            fit, val = inner_split(tr, grouped, s)
+            with redirect_stdout(io.StringIO()):
+                model, _ = train_mlp(fit, val, features=feats, seed=s, **params)
+            scaler = StandardScaler().fit(fit[feats])
+            pred = np.array(LABELS)[predict(model, scaler, te, feats)]
+        else:
+            rf = RandomForestClassifier(random_state=s, n_jobs=-1, **params)
+            rf.fit(tr[feats], tr["label"])
+            pred = rf.predict(te[feats])
+        preds.append(encode(pred))
+    return preds
 
 
 if __name__ == "__main__":
-    print("Scoring on the TEST sets: run once per setting and do not tune on these numbers.")
+    print("Scoring on the TEST sets (seed-averaged). Report these numbers whatever they show.")
     df = load_main_dataset()
     tag = "measured" if MEASURED_ONLY else "all"
-    rows = []
+    rows, contrast_rows = [], []
 
     for split_name, split_fn, grouped in [("RANDOM", random_split, False),
                                           ("ELEMENT", element_split, True)]:
@@ -86,27 +108,46 @@ if __name__ == "__main__":
             te = test.dropna(subset=LAYERS[last][1])
             t = encode(te["label"])
             groups = te["z"].to_numpy() if grouped else None
+            boots = make_boots(t, groups)
 
             print(f"\n=== {split_name} | rows complete through '{LAYERS[last][0]}' | "
                   f"train {len(tr)}, test {len(te)} ===")
             print(te["label"].value_counts().to_dict())
 
-            table = []
+            preds, table = {}, []
             for layer_name, feats in LAYERS[: last + 1]:
                 for model_name, (kind, params) in MODELS.items():
-                    p = encode(fit_predict(tr, te, grouped, feats, kind, params))
-                    f1 = f1_vector(t, p)
-                    lo, hi = bootstrap(t, p, groups)
+                    ps = fit_predict(tr, te, grouped, feats, kind, params)
+                    preds[(layer_name, model_name)] = ps
+                    m5, m4 = score(t, ps)
+                    lo, hi = ci4(t, ps, boots)
+                    per_class = np.nanmean([f1_vector(t, p) for p in ps], axis=0)
                     table.append({
                         "layer": layer_name, "model": model_name,
-                        "macro_f1": np.nanmean(f1),
-                        "macro_f1_4class": np.nanmean(f1[:4]),
-                        "ci_4class": f"[{lo[1]:.3f}, {hi[1]:.3f}]",
-                        **{f"f1_{lab}": v for lab, v in zip(LABELS, f1)},
+                        "macro_f1": m5, "macro_f1_4class": m4,
+                        "ci_4class": f"[{lo:.3f}, {hi:.3f}]",
+                        "seed_sd_4class": np.std([np.nanmean(f1_vector(t, p)[:4]) for p in ps]),
+                        **{f"f1_{lab}": v for lab, v in zip(LABELS, per_class)},
                     })
             print(pd.DataFrame(table).round(3).to_string(index=False))
-            rows += [{"split": split_name, "experiment": LAYERS[last][0],
-                      "n_train": len(tr), "n_test": len(te), **r} for r in table]
+
+            pairs = [(f"{lay}: MLP - RF", preds[(lay, "MLP")], preds[(lay, "RF")])
+                     for lay, _ in LAYERS[: last + 1]]
+            pairs += [(f"{m}: {lay} - T1", preds[(lay, m)], preds[("T1", m)])
+                      for lay, _ in LAYERS[1 : last + 1] for m in MODELS]
+            ctable = []
+            for name, a, b in pairs:
+                point, lo, hi = diff_ci(t, a, b, boots)
+                ctable.append({"contrast": name, "diff_4class": point,
+                               "ci_95": f"[{lo:+.3f}, {hi:+.3f}]"})
+            print("\nPaired contrasts, four-class macro-F1 (an interval excluding 0 suggests a real difference):")
+            print(pd.DataFrame(ctable).round(3).to_string(index=False))
+
+            meta = {"split": split_name, "experiment": LAYERS[last][0],
+                    "n_train": len(tr), "n_test": len(te)}
+            rows += [{**meta, **r} for r in table]
+            contrast_rows += [{**meta, **c} for c in ctable]
 
     Path("results").mkdir(exist_ok=True)
     pd.DataFrame(rows).to_csv(f"results/final_eval_{tag}.csv", index=False)
+    pd.DataFrame(contrast_rows).to_csv(f"results/final_eval_contrasts_{tag}.csv", index=False)

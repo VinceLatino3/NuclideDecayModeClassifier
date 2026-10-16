@@ -60,8 +60,8 @@ def class_weights(y, power=1.0):
 def train_mlp(train_df, val_df, epochs=300, patience=30, lr=1e-3,
               weight_decay=1e-4, batch_size=64, use_class_weights=True,
               hidden=64, layers=2, dropout=0.1, weight_power=1.0,
-              features=TIER1):
-    torch.manual_seed(SEED)
+              features=TIER1, seed=SEED):                        
+    torch.manual_seed(seed)
     (Xtr, ytr), (Xva, yva) = prepare(train_df, val_df, features)
     loader = DataLoader(TensorDataset(Xtr, ytr), batch_size=batch_size, shuffle=True)
     Xva_d = Xva.to(DEVICE)
