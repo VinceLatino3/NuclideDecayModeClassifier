@@ -42,8 +42,6 @@ Contains 3,386 nuclides with 55 columns; raw file included in git, so no downloa
 ```
 MLNuclearPhysics/
 ├── data/raw/                  # untouched download (included in git)
-├── data/processed/
-├── notebooks/                 # exploration
 ├── results/                   # CSVs: searches, ablations, importance, final evaluation
 ├── figures/                   # learning curves, error chart
 ├── src/
